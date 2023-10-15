@@ -1,0 +1,298 @@
+---
+title: "Compilation of Statistical and Modelling Techniques"
+author: "Keith Post"
+format: html
+editor: visual
+---
+
+# Introduction
+
+This document will provide a concise but sufficient coverage of a variety of statistical and modelling techniques, which will include assumptions, coding basics, interpretation, and links to references.
+
+```{r}
+# Load packages & source functions
+pacman::p_load(here, tidyverse, rstatix, DT, janitor)
+
+source(here("objs_and_fns", "00_helper-fns.R"))
+```
+
+# Parametric Statistics
+
+## t-test (unpaired, 2-sample)
+
+### Generate data
+
+Data will be generated through sampling of normal distributions to produce the two samples. These samples will be combined into a tibble and pivoted to long format. Here is a sample of the data.
+
+```{r}
+# Generate simulated data
+## Simulate data & combine into tibble
+set.seed(33)
+x <- rnorm(30, 0, 1)
+y <- rnorm(30, 0.5, 1)
+
+df_samp <- tibble(x, y) %>%
+  pivot_longer(cols=everything(), names_to="var", values_to="value")
+
+
+## Show in table (dat sample)
+df_samp %>%
+  mutate(value=signif(value, 3)) %>%
+  head(10) %>%
+  DT::datatable(options=list(dom="t"), rownames=FALSE, caption="Data sample")
+```
+
+### Assumptions (<https://www.statology.org/t-test-assumptions/>)
+
+There are four assumptions of a t-test:
+
+1.  Independent observations (per sample)
+2.  Approximately normally distributed data (per sample)
+3.  Equal variance
+4.  Random sampling
+
+The two assumptions listed above that are testable statistically are normal distribution of data and equal variance.
+
+```{r}
+# Test assumptions (that are testable)
+## Normal distribution
+#plot histograms
+df_samp %>%
+  ggplot(aes(x=value, fill=var)) +
+  geom_histogram(aes(y=after_stat(density)), alpha=0.8, bins=10, color="black") +
+  geom_density(alpha=0, lwd=2) +
+  scale_fill_manual(values=c("x"="steelblue", "y"="darkgreen")) +
+  facet_wrap(~var) +
+  labs(fill="") +
+  theme_bw(base_size=14) +
+  theme(legend.position="bottom")
+#appear normal
+
+
+#Shappiro tests
+df_samp %>%
+  group_by(var) %>%
+  shapiro_test(value)
+#neither is signifcant--which suggest normal distribution
+
+
+## Equal variance
+#Levene's test
+df_samp %>%
+  levene_test(value ~ var) #0.664; NS, thus similar variance
+
+```
+
+The testing of these assumptions indicate that the samples are normally distributed and have equal variance. This is unsurprising given that they are derived from normal distributions with the same standard deviations.
+
+### Run t-test
+
+The t-test will be run on the x and y samples. This will be a two-sided t-test (i.e., default alternative argument set to "two.sided") with equal variance (i.e., the var.equal argument set to TRUE ) and a default alpha level of 0.05 (conf.level = 0.95 (default)).
+
+```{r}
+# Run t-test
+t_test(df_samp, formula=value ~ var, var.equal=TRUE) %>%
+  mutate(statistic=signif(statistic, 3)) %>%
+  select(-`.y.`) %>%
+  datatable(options=list(dom="t"))
+```
+
+The result indicates that the test is *not* significant because *p* \> 0.05. This means that the populational averages of groups x and y are *not* statistically different.
+
+## ANOVA
+
+### One-way ANOVA
+
+Let's generate three samples.
+
+```{r}
+# Generate and preview data
+## Simulate data
+set.seed(21)
+x <- rnorm(20, 6, 2)
+y <- rt(20, 5, 4)
+z <- rt(20, 5, 5)
+
+# y <- rt(30, 5, 2.7)
+# z <- rt(30, 10, 2)
+
+df_samp_anova <- tibble(x, y, z) %>%
+  pivot_longer(everything(), names_to="group", values_to="value")
+
+
+## Show in table (dat sample)
+df_samp_anova %>%
+  mutate(value=signif(value, 3)) %>%
+  head(10) %>%
+  DT::datatable(options=list(dom="t"), rownames=FALSE, caption="Data sample")
+
+```
+
+#### Assumptions (INSERT REF)
+
+There are three assumptions of an ANOVA:
+
+1.  Independent observations
+2.  Residuals are normally distributed
+3.  Homogeneity of variances
+
+The second two assumptions can be tested in R:
+
+```{r}
+# Test ANOVA assumptions
+## Normal distribution of residuals
+#grab residuals
+df_resid_anova <- aov(value ~ group, data=df_samp_anova) %>%
+  resid() %>%
+  tibble(resid=.)
+
+#plot histogram of them
+df_resid_anova %>%
+  ggplot(aes(x=resid)) +
+  geom_histogram(aes(y=after_stat(density)), alpha=0.8, bins=10, 
+                 color="black", fill="steelblue") +
+  geom_density(alpha=0, lwd=2) +
+  theme_bw(base_size=14) +
+  theme(legend.position="bottom")
+
+#shapiro test
+df_resid_anova %>%
+  shapiro_test(resid)
+#significant (p < 0.007)
+
+
+## Homogeneity of variances
+df_samp_anova %>%
+  make_anova_boxplot()
+#spread of data among groups appears similar
+
+
+df_samp_anova %>%
+  levene_test(value ~ group)
+#NS; p > 0.5
+```
+
+The results show that the residuals are *not* normally distributed as evidenced by the right-skewed histogram of residuals and significant Shapiro test result. Conversely, the variances among groups is similar. The boxplots show similar spreads in data among x, y, and z and the Levene's test was not significant. In this case, a data transformation such as the log transformation is commonly performed to achieve normality of residuals.
+
+```{r}
+# Data Transformation
+df_samp_anova_transform <- df_samp_anova %>%
+  #log is a common transformations
+  mutate(log_value=log(value)) 
+
+df_samp_anova_transform_long <- df_samp_anova_transform %>%
+  pivot_longer(cols=ends_with("value"),
+               names_to="value_type",
+               values_to="value") %>%
+  mutate(value_type=ifelse(value_type=="value",
+                           "raw",
+                           "log"))
+
+df_resid_anova_transform <- df_resid_anova %>%
+  rename(raw="resid") %>%
+  bind_cols(
+    log = aov(log_value ~ group, data=df_samp_anova_transform) %>% resid()) %>%
+  pivot_longer(cols=everything(), names_to="transform", values_to="resid", 
+               names_prefix="resid_")
+
+  
+
+# Re-test assumptions
+#plot histogram of them
+df_resid_anova_transform %>%
+  mutate(transform=factor(transform, levels=c("raw", "log", "sqrt"))) %>%
+  ggplot(aes(x=resid)) +
+  geom_histogram(aes(y=after_stat(density), fill=transform), alpha=0.8, bins=10, 
+                 color="black") +
+  geom_density(alpha=0, lwd=2) +
+  scale_fill_manual(values=c("raw"="gray60", "log"="steelblue")) +
+  facet_wrap(~transform, nrow=3, scales="free") +
+  labs(fill="") +
+  theme_bw(base_size=14) +
+  theme(legend.position="none")
+#log transformation creates a more symmetrical distribution
+
+#shapiro test
+df_resid_anova_transform %>%
+  group_by(transform) %>%
+  shapiro_test(resid)
+#log-transform = NS
+
+
+## Homogeneity of variances
+df_samp_anova_transform_long %>%
+  group_by(value_type) %>%
+  levene_test(value ~ group)
+#log-transform: NS
+```
+
+The data were log-transformed and their residuals plotted as histograms followed and tested for normality. The plot of residuals of the log-transformed data indicate greater symmetry, which is supported by a non-significant result from the Shapiro test results. A Levene's test was also non-significant, indicating homogeneity among variances.
+
+Given these results, boxplots of each group were constructed using both raw and log-transformed data.
+
+```{r}
+# Boxplots of data among groups
+df_samp_anova_transform_long <- df_samp_anova_transform %>%
+  pivot_longer(cols=ends_with("value"), 
+               names_to="transform_type", 
+               values_to="value")
+
+df_samp_anova_transform_long %>%
+  mutate(transform_type=ifelse(transform_type=="value",
+                               "raw",
+                               str_replace(transform_type, 
+                                           "_value$", 
+                                           "-transformed")),
+         transform_type=factor(transform_type, levels=c("raw", "log-transformed"))) %>%
+  make_anova_boxplot(facet=TRUE)
+```
+
+Both sets of boxplots show that groups x and z have larger medians (and likely means) than group z. A one-way ANOVA was conducted on the log-transformed data to test for significance differences.
+
+```{r}
+# Run ANOVA 
+anova_mod <- aov(log_value ~ group, data=df_samp_anova_transform)
+summary(anova_mod)[[1]] %>% 
+  clean_names() %>%
+  mutate(across(.cols=!df, ~signif(.x, 3)),
+         p_value_sig=ifelse(pr_f <= 0.05,
+                            "*",
+                            "ns")) %>%
+  rename(p_value="pr_f") %>%
+  DT::datatable(options=list(dom="t"))
+#p < 0.017
+
+# Run post-hoc Tukey's HSD test
+df_samp_anova_transform %>%
+  tukey_hsd(log_value ~ group) %>%
+  clean_names() %>%
+  select(-c(term, null_value)) %>%
+  mutate(across(.cols=c(estimate, conf_low, conf_high, p_adj),
+                ~signif(.x, 3))) %>%
+  DT::datatable(options=list(dom="t"))
+#significant difference between groups y and z 
+#trend for x-y
+#NS for x-z
+
+# Create forest plot
+
+
+
+
+```
+
+# 
+
+# Linear Regression
+
+## Simple Linear Regression
+
+## Multiple Linear Regression
+
+### Logistic Regression
+
+### Generalized Linear Models
+
+### Generalized Linear Mixed Models
+
+### 
