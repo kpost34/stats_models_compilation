@@ -11,7 +11,7 @@ This document will provide a concise but sufficient coverage of a variety of sta
 
 ```{r}
 # Load packages & source functions
-pacman::p_load(here, tidyverse, rstatix, DT, janitor)
+pacman::p_load(here, tidyverse, rstatix, DT, janitor, datasets)
 
 source(here("objs_and_fns", "00_helper-fns.R"))
 ```
@@ -252,6 +252,7 @@ Both sets of boxplots show that groups x and z have larger medians (and likely m
 ```{r}
 # Run ANOVA 
 anova_mod <- aov(log_value ~ group, data=df_samp_anova_transform)
+
 summary(anova_mod)[[1]] %>% 
   clean_names() %>%
   mutate(across(.cols=!df, ~signif(.x, 3)),
@@ -263,8 +264,10 @@ summary(anova_mod)[[1]] %>%
 #p < 0.017
 
 # Run post-hoc Tukey's HSD test
-df_samp_anova_transform %>%
-  tukey_hsd(log_value ~ group) %>%
+tukey_mod <- df_samp_anova_transform %>%
+  tukey_hsd(log_value ~ group)
+
+tukey_mod %>%
   clean_names() %>%
   select(-c(term, null_value)) %>%
   mutate(across(.cols=c(estimate, conf_low, conf_high, p_adj),
@@ -275,17 +278,63 @@ df_samp_anova_transform %>%
 #NS for x-z
 
 # Create forest plot
-
-
+tukey_mod %>%
+  select(-null.value) %>%
+  mutate(comp=paste(group1,group2,sep="-"),
+         comp=fct_relevel(comp,c("x-y","x-z","y-z"))) %>%
+  ggplot() +
+  geom_linerange(aes(x=comp,ymin=conf.low,ymax=conf.high)) +
+  geom_hline(yintercept=0,linetype=2,color="blue") +
+  geom_point(aes(x=comp,y=estimate),size=4) +
+  geom_text(aes(x=comp,y=estimate,label=paste0("p=",p.adj)),
+            size=6, nudge_x=.1, nudge_y=.05) +
+  coord_flip() +
+  labs(x="Mean comparison",
+       y="Mean difference") +
+  theme_bw(base_size=17) 
 
 
 ```
 
-# 
+The results of the one-way ANOVA indicate a significant differ among the three groups as evidenced by *p* \< 0.02. A *post hoc* Tukey's HSD test was conducted among all pairwise comparisons to identify the source of the difference. This showed that group y was significantly smaller than group z (*p* \< 0.02). The forest plot shows that the confidence interval surrounding the mean differences for all pairwise comparisons. Only x-z does not contain 0; thus, this difference is significant at alpha = 0.05.
 
 # Linear Regression
 
 ## Simple Linear Regression
+
+#### Introduction
+
+Real data instead of simulated data will be used for this statistical model. The data will come from the *cars* dataset in the {datasets} package. It is a simple data frame with two variables--speed (numeric speed of the car in miles per hour) and dist (stopping distance in feet)\--and there are 50 rows of data. This sets up nicely for a simple linear regression, which contains a predictor or independent variable (x) and a dependent variable (y) and follows the form *y* = *mx* + *b*, where *m* is the slope of the line and *b* is the y-intercept. A simple linear regression has five assumptions.
+
+#### Assumptions (REFERENCE = <https://www.jmp.com/en_us/statistics-knowledge-portal/what-is-regression/simple-linear-regression-assumptions.html>
+
+1.  Linear relationship between x and y
+2.  Normally distributed errors
+3.  Constant variance in y
+4.  Independent observations
+
+Let's assess these as best as we can. We will assume that the observations are independent, but the others can be assessed through statistical methods.
+
+```{r}
+# Test Assumptions
+## Linear relationship
+cars %>%
+  ggplot(aes(x=speed, y=dist)) +
+  geom_point() +
+  theme_bw()
+#this scatter plot indicates a positive, linear relationship between speed and dist
+
+## Normally distributed errors
+linear_mod <- lm(dist ~ speed, cars) 
+
+lm_resid <- resid(linear_mod)
+
+lm_resid %>%
+  tibble
+
+
+
+```
 
 ## Multiple Linear Regression
 
