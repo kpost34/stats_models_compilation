@@ -11,7 +11,7 @@ This document will provide a concise but sufficient coverage of a variety of sta
 
 ```{r}
 # Load packages & source functions
-pacman::p_load(here, tidyverse, rstatix, DT, janitor, datasets)
+pacman::p_load(here, tidyverse, rstatix, DT, janitor, datasets, ggfortify, lmtest, broom, GGally)
 
 source(here("objs_and_fns", "00_helper-fns.R"))
 ```
@@ -304,7 +304,7 @@ The results of the one-way ANOVA indicate a significant differ among the three g
 
 #### Introduction
 
-Real data instead of simulated data will be used for this statistical model. The data will come from the *cars* dataset in the {datasets} package. It is a simple data frame with two variables--speed (numeric speed of the car in miles per hour) and dist (stopping distance in feet)\--and there are 50 rows of data. This sets up nicely for a simple linear regression, which contains a predictor or independent variable (x) and a dependent variable (y) and follows the form *y* = *mx* + *b*, where *m* is the slope of the line and *b* is the y-intercept. A simple linear regression has five assumptions.
+Real data instead of simulated data will be used for this statistical model. The data will come from the *cars* dataset in the {datasets} package. It is a simple data frame with two variables--speed (numeric speed of the car in miles per hour) and dist (stopping distance in feet)\--and there are 50 rows of data. This sets up nicely for a simple linear regression, which contains a predictor or independent variable (x) and a dependent variable (y) and follows the form *y* = *mx* + *b*, where *m* is the slope of the line and *b* is the y-intercept. A simple linear regression has four assumptions.
 
 #### Assumptions (REFERENCE = <https://www.jmp.com/en_us/statistics-knowledge-portal/what-is-regression/simple-linear-regression-assumptions.html>
 
@@ -313,10 +313,10 @@ Real data instead of simulated data will be used for this statistical model. The
 3.  Constant variance in y
 4.  Independent observations
 
-Let's assess these as best as we can. We will assume that the observations are independent, but the others can be assessed through statistical methods.
+Let's assess these as best as we can. We will assume that the observations are independent, but the others can be evaluated through statistical methods.
 
 ```{r}
-# Test Assumptions
+# Test Assumptions with Untransformed Data
 ## Linear relationship
 cars %>%
   ggplot(aes(x=speed, y=dist)) +
@@ -327,16 +327,268 @@ cars %>%
 ## Normally distributed errors
 linear_mod <- lm(dist ~ speed, cars) 
 
-lm_resid <- resid(linear_mod)
+df_lm_resid <- resid(linear_mod) %>%
+  tibble(resid=.)
 
-lm_resid %>%
-  tibble
+df_lm_resid %>%
+  ggplot() +
+  geom_histogram(aes(x=resid), bins=40, color="black", fill="steelblue") +
+  theme_bw()
+#appears non-normal
 
+shapiro_test(df_lm_resid, resid) #significant
+
+```
+
+A scatter plot of the data showed that the first assumption of a linear relationship was met. A linear model of the data was developed and the residuals were extracted and plotted in a histogram. This plot did not indicate normality in the data. A Shapiro test was also conducted, which was significant at an alpha = 0.05 (*p* \< 0.05).
+
+Given that the assumptions were not met, dist values were log transformed and the assumptions re-tested.
+
+```{r}
+# Log-transformed Data
+## Transformation
+cars %>%
+  mutate(log_dist=log(dist)) -> df_log_cars
+
+## Linear relationship
+df_log_cars %>%
+  ggplot() +
+  geom_point(aes(x=speed, y=log_dist)) +
+  theme_bw()
+#clearly linear relationship
+
+## Construct model
+linear_mod_log <- lm(log_dist ~ speed, df_log_cars)
+
+
+## Grab residuals
+df_lm_resid_log <- resid(linear_mod_log) %>%
+  tibble(resid=.)
+
+## Test normality of residuals
+df_lm_resid_log %>%
+  ggplot() +
+  geom_histogram(aes(x=resid), bins=40, color="black", fill="steelblue") +
+  theme_bw()
+#distribution looks more symmetrical following log transformation
+
+shapiro_test(df_lm_resid_log, resid) #NS
+
+
+## Constant variance in y
+autoplot(linear_mod_log)[c(1, 3)] 
+#not indicative of constant variance; it decreases with increasing x
+
+bptest(linear_mod_log) #significant
+
+```
+
+The dependent variable, dist, was log-transformed and the assumptions re-tested. The data appeared to have a linear relationship and this time the residuals were normally distributed as evidenced by the histogram and Shapiro test. However, the constant variance assumption was not met. Plots of the residuals versus fitted values and square roots of the standardized residuals versus fitted values indicated decreasing variance as x (speed) increases. This was supported by a significant Breusch-Pagan test (*p* \< 0.004).
+
+Given these results, dist was square-root transformed and the assumptions were re-tested.
+
+```{r}
+# Sqrt-transform
+cars %>%
+  mutate(sqrt_dist=sqrt(dist)) -> df_sqrt_cars
+
+## Linear relationship
+df_sqrt_cars %>%
+  ggplot() +
+  geom_point(aes(x=speed, y=sqrt_dist)) +
+  theme_bw()
+#clearly linear relationship
+
+## Fit model and grab residuals
+linear_mod_sqrt <- lm(sqrt_dist ~ speed, df_sqrt_cars)
+
+df_lm_resid_sqrt <- resid(linear_mod_sqrt) %>%
+  tibble(resid=.)
+
+## Normality of residuals
+df_lm_resid_sqrt %>%
+  ggplot() +
+  geom_histogram(aes(x=resid), bins=30, color="black", fill="steelblue") +
+  theme_bw()
+#distribution looks more symmetrical following sqrt transformation
+
+shapiro_test(df_lm_resid_sqrt, resid) #NS
+
+
+## Constant variance in y
+### Grapically
+autoplot(linear_mod_sqrt)[c(1, 3)]
+#although neither plot has a straight, horizontal line, there is no consistent trend. Let's test it statistically.
+
+### Statistically (via test)
+#use a Breusch-Pagan test
+bptest(linear_mod_sqrt) #NS
+#indicates that Ho of no correlation between fit and residuals is not rejected
+
+```
+
+The linear relationship assumption was met per the scatter plot of the square-root transformed dist and speed. The second assumption of normality of residuals was also met. They appeared to have a normal distribution, which was supported by a Shapiro test. Finally, the square-root transformed dist had constant variance in y per the visualizations and Breusch-Pagan test. Thus, the analysis will be conducted on square-root transformed data.
+
+### Run the Analysis
+
+```{r}
+# Run the analysis
+## Summary info
+summary(linear_mod_sqrt)
+#p < 1.78 x 10^-14 & R^2 = 0.7094
+#formula = sqrt_dist = 0.32241*speed + 1.27705
+
+## Model parameters & statistics
+tidy(linear_mod_sqrt) %>%
+  bind_cols(
+    glance(linear_mod_sqrt) %>%
+      select(r.squared)
+  ) %>%
+  mutate(across(!term, ~signif(.x, 3))) %>%
+  DT::datatable()
+#significant intercept and slope, and model explains ~ 71% of variance in dist
+
+
+# Plot results
+## Grab predicted values and CI information
+### Build sequence of speeds
+vec_speed_range <- range(df_sqrt_cars$speed) 
+df_speed_seq <- seq(vec_speed_range[1], vec_speed_range[2], length.out=200) %>%
+  tibble(speed=.)
+
+
+### Generate predicted values and CI & PI bands
+df_pred_sqrt_dist <- c("confidence", "predict") %>%
+  #generate pred values with bands (CI or PI)
+  purrr::map(function(x) {
+    predict(linear_mod_sqrt, df_speed_seq, 
+            interval=x) %>%
+      as_tibble() %>%
+      {if (x=="confidence") set_names(., c("fit", "ci_lwr", "ci_upr"))
+        else set_names(., c("fit2", "pi_lwr", "pi_upr"))}
+  }) %>%
+  #bind results together with x (speed) data fed into model
+  bind_cols(df_speed_seq) %>% 
+  select(-fit2) %>%
+  relocate(speed) %>%
+  rename_with(.cols=!speed, .fn=~paste0("dist_sqrt__", .x)) %>%
+  #back-convert fitted and bands of intervals to raw dist
+  mutate(across(!speed, ~.x^2, 
+                .names="{.col}2")) %>% 
+  rename_with(.cols=ends_with("2"), .fn=~str_remove_all(.x, "_sqrt|2")) %>%
+  #pivot to multiple values
+  pivot_longer(cols=!speed,
+               names_to=c("dist_type", ".value"),
+               names_pattern="(.+)__(.+)") %>%
+  mutate(dist_type=str_replace(dist_type, "dist_sqrt", "sqrt_dist"))
+
+  
+## Plot data and predicted values
+### With regression line using raw and transformed data
+df_sqrt_cars %>%
+  pivot_longer(cols=!speed, names_to="dist_type", values_to="y") %>%
+  mutate(dist_type=factor(dist_type, levels=c("sqrt_dist", "dist"))) %>%
+  ggplot(aes(x=speed, y=y)) +
+  geom_point(aes(color=dist_type)) +
+  geom_line(data=df_pred_sqrt_dist, 
+            aes(x=speed, y=fit)) +
+  geom_ribbon(data=df_pred_sqrt_dist,
+              aes(x=speed, y=fit, ymin=ci_lwr, ymax=ci_upr),
+              fill="gray50", alpha=.3) +
+  geom_ribbon(data=df_pred_sqrt_dist,
+              aes(x=speed, y=fit, ymin=pi_lwr, ymax=pi_upr),
+              fill="gray20", alpha=.3) +
+  facet_wrap(~dist_type, scales="free") +
+  labs(y="") +
+  theme_bw(base_size=15)  +
+  theme(legend.position="none")
+#faceted figure with dist (left) and sqrt_dist (right)
+#includes data as points, regression line, and both CI (darker, narrower), and
+  #PI (lighter, wider) bands
+#expect non-linear trend in left plot because this shows back-transformed predictions
+  #and not a direct fit of the data
+#both CI bands are narrow and show consistent variance throughout the range with only
+  #slight widening of CI bands at extremes
 
 
 ```
 
+The results indicate that both the slope (*p* \< 2 x 10\^14) and intercept (*p* \< 0.05) were significant with a strong relationship (R \^2 = 0.709). The linear model for this relationship as is follows:
+
+*sqrt_dist* = 0.322 \* speed + 1.28
+
+Unsurprisingly, back-transformation of the data (by squaring dist) yields a positive, non-linear regression line.
+
 ## Multiple Linear Regression
+
+#### Introduction
+
+Real data again will be used to illustrate multiple linear regression. The data will come from the *mtcars* dataset in the {datasets} package. The *mtcars* dataset contains fuel efficiency and 10 variables related to the engine, transmission, design, and performance for 32 automobile models (i.e., 32 rows by 11 columns) produced from 1973-1974 that may influence fuel consumption.
+
+```{r}
+mtcars %>%
+  DT::datatable(rownames=FALSE, options=list(dom="tlip"))
+```
+
+The dataset encodes all variables as *double*, but it is apparent that many variables are integers (including binary variables), and thus can be re-classified.
+
+```{r}
+mtcars %>%
+  distinct(cyl, vs, am, gear, carb) %>%
+  DT::datatable()
+```
+
+In this section, multiple linear regression will be used with mtcars to develop a model between the dependent variable, *mpg*, and multiple predictor variables. To simplify the analysis, a subset of predictors will be used. Here's a list of them with their associated descriptions:
+
+-   *disp*: displacement (cu. in.)
+
+-   *hp*: gross horsepower
+
+-   *wt*: weight (1000 lbs)
+
+-   *vs*: engine (0 = V-shaped, 1 = straight)
+
+-   *mpg*: miles per (US) gallon \[**dependent variable**\]
+
+Let's look at the assumptions.
+
+#### Assumptions (REFERENCE =
+
+Like simple linear regression, multiple linear regression has the same four assumptions *and* lack of multicollinearity. Thus, they are as follows:
+
+1.  Linear relationship between x and y
+2.  Normally distributed errors
+3.  Constant variance in y
+4.  Independent observations
+5.  No multicollinearity among predictors
+
+Let's test assumptions 1-3 and 5 statistically. First, a linear relationship between each predictor and the dependent variable, *mpg*, will be assessed visually using scatter plots. Note, that *vs* does not need to be tested as it is a binary, dummy variable.
+
+```{r}
+# Test assumption 1: linear relationship
+mtcars_mlr <- mtcars %>%
+  select(disp, hp, wt, vs, mpg)
+
+pairs <- mtcars_mlr %>% 
+  select(-vs) %>%
+  ggpairs() 
+
+plots <- lapply(1:(pairs$ncol-1), function(j) getPlot(pairs, i=4, j=j))
+
+ggmatrix(
+  plots,
+  nrow=1,
+  ncol=pairs$ncol-1,
+  xAxisLabels=pairs$xAxisLabels[1:3],
+  yAxisLabels="mpg"
+) 
+
+``
+```
+
+These plots clearly indicate linear relationship between *mpg* and the three numerical predictors: *disp*, *hp*, and *wt*.
+
+Next, assumption 2 will be assessed using
 
 ### Logistic Regression
 
@@ -344,4 +596,6 @@ lm_resid %>%
 
 ### Generalized Linear Mixed Models
 
-### 
+### Splines
+
+### AB Testing

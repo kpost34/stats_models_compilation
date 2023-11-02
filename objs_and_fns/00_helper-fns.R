@@ -1,7 +1,8 @@
 #Created by Keith Post on 10/14/23
 #Helper functions
 
-
+# ANOVA-related
+## Create boxplots
 make_anova_boxplot <- function(data, facet=FALSE) {
   data %>%
     ggplot(aes(x=group, y=value)) +
@@ -14,6 +15,10 @@ make_anova_boxplot <- function(data, facet=FALSE) {
     theme_bw(base_size=16) +
     theme(legend.position="bottom")
 }
+
+
+
+
 
 
 
